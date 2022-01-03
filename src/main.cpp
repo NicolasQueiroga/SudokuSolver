@@ -9,10 +9,7 @@
 #include <iostream>
 #include "aux.hpp"
 
-/**
- * @brief 
- * 
- */
+
 class SudokuProc
 {
 protected:
@@ -75,7 +72,7 @@ public:
 std::string path = "../img/sudoku.png";
 int main(int, char **)
 {
-    colorPicker(path);
+    colorPicker();
     SudokuProc sp = SudokuProc(path);
     sp.proc();
     return 0;

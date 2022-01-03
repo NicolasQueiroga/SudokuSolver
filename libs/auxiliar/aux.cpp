@@ -73,8 +73,9 @@ std::vector<int> colorPicker(std::string path)
 
 cv::Mat getMask(cv::Mat bgr, std::vector<int> hsvRanges, bool kernel)
 {
-    cv::Mat hsv, mask, morphMask;
-    cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
+    cv::Mat blurred, hsv, mask, morphMask;
+    cv::GaussianBlur(bgr, blurred, cv::Size(5, 5), 0);
+    cv::cvtColor(blurred, hsv, cv::COLOR_BGR2HSV);
 
     int hmin = hsvRanges[0], hmax = hsvRanges[3];
     int smin = hsvRanges[1], smax = hsvRanges[4];

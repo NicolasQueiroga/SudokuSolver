@@ -3,6 +3,8 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/ml.hpp>
 
+#include "aux.hpp"
+
 #include <iostream>
 #include <sstream>
 
@@ -30,7 +32,7 @@ public:
     }
 };
 
-int main()
+int callme()
 {
     std::vector<ContourWithData> allContoursWithData;
     std::vector<ContourWithData> validContoursWithData;
@@ -46,9 +48,9 @@ int main()
     fsClassifications["classifications"] >> matClassificationInts;
     fsClassifications.release();
     cv::Mat matTrainingImagesAsFlattenedFloats;
-    cv::FileStorage fsTrainingImages("../images.xml", cv::FileStorage::READ);
+    cv::FileStorage fsTrainingImages("/home/nicolas/opencv_ws/SudokuSolver/model/images.xml", cv::FileStorage::READ);
 
-    if (fsTrainingImages.isOpened())
+    if (fsTrainingImages.isOpened() == false)
     {
         std::cout << "error, unable to open training images file, exiting program\n\n";
         return 0;
@@ -61,7 +63,8 @@ int main()
     kNearest->train(matTrainingImagesAsFlattenedFloats, cv::ml::ROW_SAMPLE, matClassificationInts);
 
     cv::Mat matTestingNumbers = cv::imread("../test/sudoku.png");
-    if (matTestingNumbers.empty())
+    cv::imshow("bgr", matTestingNumbers);
+    if (matTestingNumbers.empty() == false)
     {
         std::cout << "error: image not read from file\n\n";
         return 0;
@@ -83,7 +86,7 @@ int main()
 
     cv::findContours(matThreshCopy, ptContours, v4iHierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    for (unsigned long int i = 0; i < ptContours.size(); i++)
+    for (long unsigned int i = 0; i < ptContours.size(); i++)
     {
         ContourWithData contourWithData;
         contourWithData.ptContour = ptContours[i];
@@ -123,6 +126,47 @@ int main()
 
     cv::imshow("matTestingNumbers", matTestingNumbers);
     cv::waitKey(0);
+}
 
+
+void processFrame(cv::Mat *input, cv::Mat *output)
+{
+    cv::Mat gray, thresh1;
+
+    cv::cvtColor(*input, gray, cv::COLOR_BGR2GRAY);
+    cv::threshold(gray, thresh1, 0, 255, cv::THRESH_OTSU | cv::THRESH_BINARY_INV);
+
+}
+
+int main()
+{
+    std::string path = "/home/nicolas/opencv_ws/SudokuSolver/model/test/sudoku.png";
+    cv::Mat bgr, gray, blurred, thresh, mask, frame;
+    // cv::VideoCapture cap(0);
+    // while (true)
+    // {
+    //     cap.read(frame);
+    //     bgr = frame.clone();
+    //     cv::cvtColor(bgr, gray, cv::COLOR_BGR2GRAY);
+    //     cv::GaussianBlur(gray, blurred, cv::Size(5, 5), 0);
+    //     cv::adaptiveThreshold(blurred, thresh, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY_INV, 7, 2.2);
+    //     cv::imshow("Video", thresh);
+    //     int ch = cv::waitKey(1);
+    //     if (ch == 27)
+    //     {
+    //         break;
+    //     }
+    // }
+    // cv::destroyAllWindows();
+
+    colorPicker(path);
+
+    // std::vector<int> hsv = colorPicker(path);
+    // std::vector<std::vector<cv::Point>> contours = getAllContours(thresh);
+    // cv::drawContours(bgr, contours, -1, cv::Scalar(255, 0, 0), 2);
+
+    // cv::imshow("bgr", thresh);
+    // cv::imshow("contours", bgr);
+    // cv::waitKey(0);
     return 0;
 }
