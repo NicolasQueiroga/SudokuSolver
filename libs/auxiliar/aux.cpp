@@ -100,7 +100,7 @@ cv::Mat getEdges(cv::Mat img, bool isMask)
     cv::Mat gray, blur, edges, kernel, dilated;
 
     if (!isMask)
-        cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
     else
         gray = img;
 
@@ -112,13 +112,9 @@ cv::Mat getEdges(cv::Mat img, bool isMask)
     return dilated;
 }
 
-std::vector<std::vector<cv::Point>> getAllContours(cv::Mat mask)
+void getAllContours(cv::Mat mask, std::vector<std::vector<cv::Point>> *contours, std::vector<cv::Vec4i> *hierarchy)
 {
-    std::vector<std::vector<cv::Point>> contours;
-    std::vector<cv::Vec4i> hierarchy;
-    cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
-    return contours;
+    cv::findContours(mask, *contours, *hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_NONE);
 }
 
 int getMaxAreaContourId(std::vector<std::vector<cv::Point>> contours)
@@ -138,17 +134,16 @@ int getMaxAreaContourId(std::vector<std::vector<cv::Point>> contours)
     return maxAreaContourId;
 }
 
-std::vector<cv::Point> getMaxAreaContour(cv::Mat mask, cv::Mat *out)
+std::vector<cv::Point> getMaxAreaContour(cv::Mat mask)
 {
+    std::vector<std::vector<cv::Point>> contours;
+    std::vector<cv::Vec4i> hierarchy;
     std::vector<cv::Point> contour;
-    std::vector<std::vector<cv::Point>> contours = getAllContours(mask);
+    getAllContours(mask, &contours, &hierarchy);
 
     int id = getMaxAreaContourId(contours);
     if (id != -1)
-    {
         contour = contours[id];
-        cv::drawContours(*out, contours, id, cv::Scalar(0, 255, 0), 2);
-    }
 
     return contour;
 }
@@ -245,114 +240,4 @@ double getAngleWithVertical(double m)
 {
     double rads = CV_PI / 2 + atan(m);
     return rads /**180/CV_PI*/;
-}
-
-/* functions for use with ROS */
-std::vector<cv::Point> getAllContoursCenter(cv::Mat bgr, std::vector<std::vector<cv::Point>> contours, cv::Rect roi, std::string direction)
-{
-    std::vector<cv::Point> points;
-    cv::Point p;
-    for (std::vector<cv::Point> contour : contours)
-    {
-        p = getContourCenter(contour);
-        if (p.y < bgr.size().height / 3 && p.y > bgr.size().height / 10)
-        {
-            if (direction == "right")
-                p.x += roi.width;
-            else if (direction.empty())
-                p.y += roi.height;
-
-            crossHair(bgr, p, 10);
-            points.push_back(p);
-        }
-    }
-
-    return points;
-}
-
-cv::Rect cropImg(cv::Mat bgr, std::string direction)
-{
-    int x = 0, w = 0, y, h;
-    y = bgr.size().height / 2;
-    h = bgr.size().height / 2;
-
-    if (direction == "left")
-    {
-        y = 0;
-        h = bgr.size().height;
-        x = 0;
-        w = bgr.size().width / 2;
-    }
-    else if (direction == "right")
-    {
-        y = 0;
-        h = bgr.size().height;
-        x = bgr.size().width / 2;
-        w = bgr.size().width / 2;
-    }
-    else
-    {
-        x = 0;
-        w = bgr.size().width;
-    }
-    cv::Rect roi(x, y, w, h);
-
-    return roi;
-}
-
-double linearRegression(cv::Mat bgr, cv::Point *pmin, std::string direction)
-{
-    cv::Mat mask;
-    cv::Rect roi;
-    std::vector<int> ranges = {25, 188, 200, 32, 255, 255};
-    std::vector<std::vector<cv::Point>> contours;
-    std::vector<cv::Point> points;
-    double xsum = 0, x2sum = 0, ysum = 0, xysum = 0, a, b;
-    int xmin = 10000, xmax = 0;
-    int ymin = 10000, ymax = 0;
-    int n = 0;
-
-    roi = cropImg(bgr, direction);
-    mask = getMask(bgr(roi), ranges);
-    contours = getAllContours(mask);
-    points = getAllContoursCenter(bgr, contours, roi, direction);
-
-    for (cv::Point p : points)
-    {
-        if (p.x >= 0 && p.y > 0)
-        {
-            xsum += p.x;
-            ysum += p.y;
-            x2sum += pow(p.x, 2);
-            xysum += p.x * p.y;
-
-            if (p.y < ymin)
-            {
-                ymin = p.y;
-                xmax = p.x;
-            }
-            if (p.y > ymax)
-            {
-                ymax = p.y;
-                xmin = p.x;
-            }
-
-            n++;
-        }
-    }
-
-    a = (n * xysum - xsum * ysum) / (n * x2sum - xsum * xsum);
-    b = (x2sum * ysum - xsum * xysum) / (x2sum * n - xsum * xsum);
-
-    *pmin = cv::Point(xmin, ymin);
-    ymin = a * xmin + b;
-    ymax = a * xmax + b;
-    cv::line(bgr, cv::Point(xmin, ymin), cv::Point(xmax, ymax), cv::Scalar(255, 255, 0), 2);
-
-    return a;
-}
-
-void creeperMask(int arucoId)
-{
-    // TODO: IMPLEMENTAR
 }

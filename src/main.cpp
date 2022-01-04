@@ -8,14 +8,24 @@
 
 #include <iostream>
 #include "aux.hpp"
-
+#include <opencv2/ml.hpp>
 
 class SudokuProc
 {
 protected:
-    std::string path;
-    cv::Mat bgr, mask, contour;
-    cv::Mat *contour_ptr = &contour;
+    cv::Ptr<cv::ml::KNearest> kNearest;
+    cv::Mat matClassificationInts;
+    cv::Mat matTrainingImagesAsFlattenedFloats;
+    cv::Mat bgr;
+    cv::Mat dilated;
+    std::vector<std::vector<cv::Point>> contours;
+    std::vector<cv::Vec4i> hierarchy;
+
+    std::vector<std::vector<cv::Point>> numbers;
+
+    std::vector<cv::Point> maxAreaContour;
+    double boxArea;
+    int board[9][9];
 
 public:
     /**
@@ -25,22 +35,46 @@ public:
      */
     SudokuProc(std::string path)
     {
-        this->path = path;
+        this->bgr = cv::imread(path);
+        this->kNearest = cv::ml::KNearest::create();
     }
     ~SudokuProc() {}
 
-    /**
-     * @brief 
-     * 
-     */
-    void proc()
+    void loadModel()
     {
-        bgr = cv::imread(this->path);
+        cv::FileStorage fsClassifications("../model/classifications.xml", cv::FileStorage::READ);
+        fsClassifications["classifications"] >> this->matClassificationInts;
+        fsClassifications.release();
 
-        contour = bgr.clone();
-        mask = getEdges(bgr, false);
-        std::vector<cv::Point> maxAreaContour = getMaxAreaContour(mask, contour_ptr);
+        cv::FileStorage fsTrainingImages("../model/images.xml", cv::FileStorage::READ);
+        fsTrainingImages["images"] >> this->matTrainingImagesAsFlattenedFloats;
+        fsTrainingImages.release();
 
+        this->kNearest->train(this->matTrainingImagesAsFlattenedFloats, cv::ml::ROW_SAMPLE, matClassificationInts);
+    }
+
+    static bool sortByBoundingRectXPosition(const std::vector<cv::Point> &cwdLeft, const std::vector<cv::Point> &cwdRight)
+    {
+        cv::Rect a, b;
+        a = cv::boundingRect(cwdLeft);
+        b = cv::boundingRect(cwdRight);
+        return (a.x < b.x) && (a.y < b.y);
+    }
+
+    void preProcessFrame()
+    {
+        cv::Mat gray, thresh, kernel;
+        cv::resize(this->bgr, this->bgr, cv::Size(), 0.5, 0.5);
+        cv::cvtColor(this->bgr, gray, cv::COLOR_BGR2GRAY);
+        cv::threshold(gray, thresh, 0, 255, cv::THRESH_OTSU | cv::THRESH_BINARY_INV);
+        kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 1));
+        cv::dilate(thresh, this->dilated, kernel);
+        getAllContours(this->dilated, &this->contours, &this->hierarchy);
+        this->maxAreaContour = getMaxAreaContour(this->dilated);
+    }
+
+    void processFrame()
+    {
         int xmin = 1000, ymin = 1000, xmax = 0, ymax = 0;
         for (cv::Point p : maxAreaContour)
         {
@@ -54,26 +88,97 @@ public:
                 ymin = p.y;
         }
 
-        int d = (xmax - xmin) / 9;
-        // int c = (xmax - xmin)/18;
-        for (int i = 0; i <= 9; i++)
-            for (int j = 0; j <= 9; j++)
-            {
-                cv::drawMarker(bgr, cv::Point(xmin + i * d, ymin + j * d), cv::Scalar(0, 0, 255));
-                // cv::drawMarker(bgr, cv::Point(xmin + c + i*d, ymin + c + j*d), cv::Scalar(255, 0, 0));
-            }
+        double d = (xmax - xmin) / 9;
+        double center = d / 2;
 
-        cv::imshow("BGR", bgr);
+        this->boxArea = d * d;
+
+        // Mark all numbers
+        for (long unsigned int i = 0; i < this->contours.size(); i++)
+        {
+            double contourArea = cv::contourArea(contours[i]);
+            if (contourArea < (2 * this->boxArea / 3) && this->hierarchy[i][3] == -1)
+                this->numbers.push_back(contours[i]);
+        }
+        // cv::drawContours(this->bgr, numbers, -1, cv::Scalar(255, 0, 255), 2); // number contours
+        std::vector<cv::Point> numberCenters;
+        for (std::vector<cv::Point> number : this->numbers)
+            numberCenters.push_back(getContourCenter(number));
+        // std::sort(numbers.begin(), numbers.end(), this->sortByBoundingRectXPosition);
+        for (cv::Point p : numberCenters)
+            cv::drawMarker(this->bgr, p, cv::Scalar(193, 0, 255));
+        // ---
+
+        // Mark all free spaces
+        unsigned int count = numbers.size() - 1;
+        for (int i = 0; i < 9; i++)
+            for (int j = 0; j < 9; j++)
+            {
+                cv::Mat copy = this->bgr.clone();
+                cv::Rect box(j * d + xmin, i * d + ymin, d, d);
+                cv::rectangle(copy, box, cv::Scalar(0, 255, 255), 2);
+
+                bool contains = 1;
+                for (cv::Point p : numberCenters)
+                    contains = contains && !p.inside(box);
+                if (contains)
+                {
+                    cv::drawMarker(this->bgr, cv::Point(xmin + center + j * d, ymin + center + i * d), cv::Scalar(255, 255, 0));
+                    this->board[j][i] = 0;
+                }
+                else
+                {
+                    int detected = this->getNumbers(numbers[count]);
+                    this->board[j][i] = detected;
+                    count--;
+                }
+            }
+        // ---
+
+        std::cout << "\n\n";
+        for (int i = 0; i < 9; i++)
+        {
+            for (int j = 0; j < 9; j++)
+                std::cout << " " << this->board[j][i];
+            std::cout << "\n";
+        }
+
+        cv::imshow("dilated", this->dilated);
+        cv::imshow("BGR", this->bgr);
         cv::waitKey(0);
+    }
+
+    int getNumbers(std::vector<cv::Point> number)
+    {
+        std::string strFinalString;
+
+        cv::Rect numberBox = cv::boundingRect(number);
+        cv::rectangle(this->bgr, numberBox, cv::Scalar(255, 0, 123));
+        cv::Mat ROI = this->dilated(numberBox);
+
+        cv::Mat ROIResized;
+        cv::resize(ROI, ROIResized, cv::Size(20, 30));
+
+        cv::Mat ROIFloat;
+        ROIResized.convertTo(ROIFloat, CV_32FC1);
+
+        cv::Mat ROIFlattenedFloat = ROIFloat.reshape(1, 1);
+        cv::Mat CurrentChar(0, 0, CV_32F);
+        this->kNearest->findNearest(ROIFlattenedFloat, 1, CurrentChar);
+
+        int fltCurrentChar = (int)CurrentChar.at<float>(0, 0);
+        strFinalString = strFinalString + char(int(fltCurrentChar));
+        std::cout << "info read = " << strFinalString << "\n";
+        return (fltCurrentChar - '0');
     }
 };
 
-
-std::string path = "../img/sudoku.png";
+std::string path = "../img/sudoku3.jpeg";
 int main(int, char **)
 {
-    colorPicker();
     SudokuProc sp = SudokuProc(path);
-    sp.proc();
+    sp.loadModel();
+    sp.preProcessFrame();
+    sp.processFrame();
     return 0;
 }
