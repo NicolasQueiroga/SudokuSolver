@@ -58,16 +58,18 @@ public:
         cv::Rect a, b;
         a = cv::boundingRect(cwdLeft);
         b = cv::boundingRect(cwdRight);
-        return (a.x < b.x) && (a.y < b.y);
+        return /*(a.x < b.x) && */ (a.y < b.y);
     }
 
     void preProcessFrame()
     {
-        cv::Mat gray, thresh, kernel;
+        cv::Mat gray, blur, thresh, kernel;
         cv::resize(this->bgr, this->bgr, cv::Size(), 0.5, 0.5);
         cv::cvtColor(this->bgr, gray, cv::COLOR_BGR2GRAY);
+        // cv::GaussianBlur(gray, blur, cv::Size(1, 1), 3, 2);
         cv::threshold(gray, thresh, 0, 255, cv::THRESH_OTSU | cv::THRESH_BINARY_INV);
         kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, 1));
+        cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, kernel);
         cv::dilate(thresh, this->dilated, kernel);
         getAllContours(this->dilated, &this->contours, &this->hierarchy);
         this->maxAreaContour = getMaxAreaContour(this->dilated);
@@ -94,16 +96,18 @@ public:
         this->boxArea = d * d;
 
         // Mark all numbers
+        std::vector<cv::Point> numberCenters;
         for (long unsigned int i = 0; i < this->contours.size(); i++)
         {
             double contourArea = cv::contourArea(contours[i]);
-            if (contourArea < (2 * this->boxArea / 3) && this->hierarchy[i][3] == -1)
+            cv::Point center = getContourCenter(contours[i]);
+            if ((contourArea < (2 * this->boxArea / 3)) && (this->hierarchy[i][3] == -1) && ((center.x >= d/2) && (center.y >= d/2)))
+            {
                 this->numbers.push_back(contours[i]);
+                numberCenters.push_back(center);
+            }
         }
-        // cv::drawContours(this->bgr, numbers, -1, cv::Scalar(255, 0, 255), 2); // number contours
-        std::vector<cv::Point> numberCenters;
-        for (std::vector<cv::Point> number : this->numbers)
-            numberCenters.push_back(getContourCenter(number));
+        cv::drawContours(this->bgr, numbers, -1, cv::Scalar(255, 0, 255), 2); // number contours
         // std::sort(numbers.begin(), numbers.end(), this->sortByBoundingRectXPosition);
         for (cv::Point p : numberCenters)
             cv::drawMarker(this->bgr, p, cv::Scalar(193, 0, 255));
@@ -116,6 +120,7 @@ public:
             {
                 cv::Mat copy = this->bgr.clone();
                 cv::Rect box(j * d + xmin, i * d + ymin, d, d);
+                cv::Mat cropped = copy(box);
                 cv::rectangle(copy, box, cv::Scalar(0, 255, 255), 2);
 
                 bool contains = 1;
@@ -132,6 +137,8 @@ public:
                     this->board[j][i] = detected;
                     count--;
                 }
+                // cv::imshow("sqrs", copy);
+                // cv::waitKey(0);
             }
         // ---
 
@@ -173,7 +180,7 @@ public:
     }
 };
 
-std::string path = "../img/sudoku3.jpeg";
+std::string path = "../img/sudoku.png";
 int main(int, char **)
 {
     SudokuProc sp = SudokuProc(path);
